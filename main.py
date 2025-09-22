@@ -1,31 +1,6 @@
 import os
 import gdown
-
-# Make sure Weights folder exists
-os.makedirs("Weights", exist_ok=True)
-
-# Model 1: best(2).pt
-file_id_1 = "1FmHHcjzOfIf2oDe77IeR7Bu2uewYtQG2"
-weights_path_1 = "Weights/best(2).pt"
-
-if not os.path.exists(weights_path_1):
-    url = f"https://drive.google.com/uc?id={file_id_1}"
-    gdown.download(url, weights_path_1, quiet=False)
-
-# Model 2: best(6).pt
-file_id_2 = "15XsZVMH6pGMXj3I6J9_Ra1EvvNHC2a8o"
-weights_path_2 = "Weights/best(6).pt"
-
-if not os.path.exists(weights_path_2):
-    url = f"https://drive.google.com/uc?id={file_id_2}"
-    gdown.download(url, weights_path_2, quiet=False)
-
-# Now you can safely load them in your code:
-# model1 = YOLO(weights_path_1)
-# model2 = YOLO(weights_path_2)
-
-
-import os, cv2, torch, numpy as np
+import cv2, torch, numpy as np
 from ultralytics import YOLO
 from torchvision.ops import nms
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle
@@ -39,9 +14,23 @@ from fastapi import FastAPI, UploadFile, Form, Request
 from fastapi.responses import FileResponse, JSONResponse
 import shutil
 
+# ---------------- DOWNLOAD YOLO MODELS ----------------
+os.makedirs("Weights", exist_ok=True)
+
+weights = {
+    "best(2).pt": "1FmHHcjzOfIf2oDe77IeR7Bu2uewYtQG2",
+    "best(6).pt": "15XsZVMH6pGMXj3I6J9_Ra1EvvNHC2a8o"
+}
+
+for name, file_id in weights.items():
+    path = os.path.join("Weights", name)
+    if not os.path.exists(path):
+        url = f"https://drive.google.com/uc?id={file_id}"
+        gdown.download(url, path, quiet=False)
+
 # ---------------- CONFIG ----------------
 C = {
-    "M": ["best(2).pt", "best(6).pt"],  # YOLO models
+    "M": [os.path.join("Weights", n) for n in weights.keys()],  # YOLO model paths
     "S": 4.8,  # ArUco marker size in cm
     "C": {
         "Cylinder": (255, 0, 0),
@@ -53,6 +42,7 @@ C = {
     "O": "ensemble_result.jpg"
 }
 
+# ---------------- LOAD YOLO MODELS ----------------
 M = [YOLO(p) for p in C["M"]]
 N = M[0].names
 
@@ -159,7 +149,6 @@ def R0(d, engineer="Engineer", sample_id="Sample-001"):
 
 # ---------------- FASTAPI ----------------
 app = FastAPI(title="Cylinder QC API")
-
 LATEST = {}  # Store latest file paths
 
 @app.post("/predict")
