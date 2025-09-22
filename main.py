@@ -1,6 +1,6 @@
 import os
 os.environ["YOLO_CONFIG_DIR"] = "/tmp/Ultralytics"
-import os
+
 import gdown
 import cv2, torch, numpy as np
 from ultralytics import YOLO
@@ -16,23 +16,19 @@ from fastapi import FastAPI, UploadFile, Form, Request
 from fastapi.responses import FileResponse, JSONResponse
 import shutil
 
-# ---------------- DOWNLOAD YOLO MODELS ----------------
+# ---------------- DOWNLOAD YOLO MODEL ----------------
 os.makedirs("Weights", exist_ok=True)
+MODEL_NAME = "ftalha.pt"
+MODEL_PATH = os.path.join("Weights", MODEL_NAME)
+FILE_ID = "1szVmzYc7REhoKXr4HZ7Kw_FtKacuDZbW"
 
-weights = {
-    "best(2).pt": "1FmHHcjzOfIf2oDe77IeR7Bu2uewYtQG2",
-    "best(6).pt": "15XsZVMH6pGMXj3I6J9_Ra1EvvNHC2a8o"
-}
-
-for name, file_id in weights.items():
-    path = os.path.join("Weights", name)
-    if not os.path.exists(path):
-        url = f"https://drive.google.com/uc?id={file_id}"
-        gdown.download(url, path, quiet=False)
+if not os.path.exists(MODEL_PATH):
+    url = f"https://drive.google.com/uc?id={FILE_ID}"
+    gdown.download(url, MODEL_PATH, quiet=False)
 
 # ---------------- CONFIG ----------------
 C = {
-    "M": [os.path.join("Weights", n) for n in weights.keys()],  # YOLO model paths
+    "M": MODEL_PATH,  # single YOLO model
     "S": 4.8,  # ArUco marker size in cm
     "C": {
         "Cylinder": (255, 0, 0),
@@ -41,12 +37,17 @@ C = {
         "honey_combing": (0, 255, 255)
     },
     "R": "cylinder_report.pdf",
-    "O": "ensemble_result.jpg"
+    "O": "annotated_result.jpg"
 }
 
-# ---------------- LOAD YOLO MODELS ----------------
-M = [YOLO(p) for p in C["M"]]
-N = M[0].names
+# Lazy-load model
+MODEL = None
+
+def load_model():
+    global MODEL
+    if MODEL is None:
+        MODEL = YOLO(C["M"])
+    return MODEL
 
 # ---------------- FUNCTIONS ----------------
 def A(img):
@@ -63,11 +64,12 @@ def A(img):
     return None
 
 def B(f):
-    """YOLO ensemble detection with NMS."""
-    r1, r2 = M[0](f)[0], M[1](f)[0]
-    b = np.vstack([r1.boxes.xyxy.cpu().numpy(), r2.boxes.xyxy.cpu().numpy()])
-    s = np.hstack([r1.boxes.conf.cpu().numpy(), r2.boxes.conf.cpu().numpy()])
-    cl = np.hstack([r1.boxes.cls.cpu().numpy(), r2.boxes.cls.cpu().numpy()])
+    """YOLO detection with NMS."""
+    model = load_model()
+    r = model(f)[0]
+    b = r.boxes.xyxy.cpu().numpy()
+    s = r.boxes.conf.cpu().numpy()
+    cl = r.boxes.cls.cpu().numpy()
     i = nms(torch.tensor(b), torch.tensor(s), 0.5)
     return [b[j] for j in i], [s[j] for j in i], [cl[j] for j in i]
 
@@ -77,9 +79,10 @@ def C0(f):
     px = A(im)
     bx, sc, cl = B(f)
     d = {"file": f, "c": 0, "v": 0, "p": 0, "h": 0, "dims": []}
+    model_names = load_model().names
     for b, s, c in zip(bx, sc, cl):
         x1, y1, x2, y2 = map(int, b)
-        nm = N[int(c)]
+        nm = model_names[int(c)]
         col = C["C"].get(nm, (255, 255, 255))
         cv2.rectangle(im, (x1, y1), (x2, y2), col, 2)
         cv2.putText(im, f"{nm} {s:.2f}", (x1, y1 - 10), 0, 0.6, col, 2)
@@ -151,7 +154,7 @@ def R0(d, engineer="Engineer", sample_id="Sample-001"):
 
 # ---------------- FASTAPI ----------------
 app = FastAPI(title="Cylinder QC API")
-LATEST = {}  # Store latest file paths
+LATEST = {}
 
 @app.post("/predict")
 async def predict(file: UploadFile, engineer: str = Form("Engineer"), sample_id: str = Form("Sample-001"), request: Request = None):
@@ -173,7 +176,6 @@ async def predict(file: UploadFile, engineer: str = Form("Engineer"), sample_id:
 
     R0(D, engineer=engineer, sample_id=sample_id)
 
-    # Save latest file paths
     LATEST["Report"] = C["R"]
     LATEST["Annotated"] = C["O"]
     LATEST["CSV Log"] = log_path
@@ -212,4 +214,3 @@ async def download_log():
     if path and os.path.exists(path):
         return FileResponse(path, media_type="text/csv", filename="inspection_log.csv")
     return JSONResponse(content={"error": "CSV log not found"})
-
