@@ -1,8 +1,8 @@
 fastapi
 uvicorn[standard]
 ultralytics
-torch
-torchvision
+torch==2.8.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+torchvision==0.23.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
 reportlab
 pillow
 pandas
