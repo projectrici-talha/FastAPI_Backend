@@ -1,4 +1,6 @@
 import os
+os.environ["YOLO_CONFIG_DIR"] = "/tmp/Ultralytics"
+import os
 import gdown
 import cv2, torch, numpy as np
 from ultralytics import YOLO
@@ -210,3 +212,4 @@ async def download_log():
     if path and os.path.exists(path):
         return FileResponse(path, media_type="text/csv", filename="inspection_log.csv")
     return JSONResponse(content={"error": "CSV log not found"})
+
