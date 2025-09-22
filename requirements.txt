@@ -1,12 +1,6 @@
-fastapi
-uvicorn[standard]
-ultralytics
-torch==2.8.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
-torchvision==0.23.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
-reportlab
-pillow
-pandas
-numpy
-gdown
-opencv-python-headless
-gunicorn
+fastapi==0.115.0
+uvicorn==0.23.2
+python-multipart==0.0.6
+fpdf==1.7.2
+pillow==10.1.0
+pandas==2.1.1
