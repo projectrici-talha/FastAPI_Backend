@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+ultralytics
+torch
+torchvision
+reportlab
+pillow
+pandas
+numpy
+gdown
+opencv-python-headless
