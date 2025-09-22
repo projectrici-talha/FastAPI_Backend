@@ -9,3 +9,6 @@ pandas
 numpy
 gdown
 opencv-python-headless
+gunicorn
+
+
