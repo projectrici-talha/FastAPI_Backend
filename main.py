@@ -4,7 +4,6 @@ os.environ["YOLO_CONFIG_DIR"] = "/tmp/Ultralytics"
 import gdown
 import cv2, torch, numpy as np
 from ultralytics import YOLO
-from torchvision.ops import nms
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
@@ -18,17 +17,17 @@ import shutil
 
 # ---------------- DOWNLOAD YOLO MODEL ----------------
 os.makedirs("Weights", exist_ok=True)
-MODEL_NAME = "ftalha.pt"
-MODEL_PATH = os.path.join("Weights", MODEL_NAME)
-FILE_ID = "1szVmzYc7REhoKXr4HZ7Kw_FtKacuDZbW"
-
-if not os.path.exists(MODEL_PATH):
-    url = f"https://drive.google.com/uc?id={FILE_ID}"
-    gdown.download(url, MODEL_PATH, quiet=False)
+ftalha_path = "Weights/ftalha.pt"
+if not os.path.exists(ftalha_path):
+    gdown.download(
+        "https://drive.google.com/uc?id=1szVmzYc7REhoKXr4HZ7Kw_FtKacuDZbW",
+        ftalha_path,
+        quiet=False
+    )
 
 # ---------------- CONFIG ----------------
 C = {
-    "M": MODEL_PATH,  # single YOLO model
+    "M": [ftalha_path],
     "S": 4.8,  # ArUco marker size in cm
     "C": {
         "Cylinder": (255, 0, 0),
@@ -40,14 +39,9 @@ C = {
     "O": "annotated_result.jpg"
 }
 
-# Lazy-load model
-MODEL = None
-
-def load_model():
-    global MODEL
-    if MODEL is None:
-        MODEL = YOLO(C["M"])
-    return MODEL
+# ---------------- LOAD YOLO MODEL ----------------
+M = [YOLO(C["M"][0])]
+N = M[0].names
 
 # ---------------- FUNCTIONS ----------------
 def A(img):
@@ -64,37 +58,44 @@ def A(img):
     return None
 
 def B(f):
-    """YOLO detection with NMS."""
-    model = load_model()
-    r = model(f)[0]
-    b = r.boxes.xyxy.cpu().numpy()
-    s = r.boxes.conf.cpu().numpy()
+    """YOLO detection."""
+    r = M[0](f)[0]
+    bx = r.boxes.xyxy.cpu().numpy()
+    sc = r.boxes.conf.cpu().numpy()
     cl = r.boxes.cls.cpu().numpy()
-    i = nms(torch.tensor(b), torch.tensor(s), 0.5)
-    return [b[j] for j in i], [s[j] for j in i], [cl[j] for j in i]
+    return bx, sc, cl
 
 def C0(f):
     """Analyze image and annotate defects."""
     im = cv2.imread(f)
+    # Resize large images to prevent memory issues
+    max_dim = 1024
+    h, w = im.shape[:2]
+    if max(h, w) > max_dim:
+        scale = max_dim / max(h, w)
+        im = cv2.resize(im, (int(w*scale), int(h*scale)))
+
     px = A(im)
     bx, sc, cl = B(f)
     d = {"file": f, "c": 0, "v": 0, "p": 0, "h": 0, "dims": []}
-    model_names = load_model().names
+
     for b, s, c in zip(bx, sc, cl):
         x1, y1, x2, y2 = map(int, b)
-        nm = model_names[int(c)]
+        nm = N[int(c)]
         col = C["C"].get(nm, (255, 255, 255))
         cv2.rectangle(im, (x1, y1), (x2, y2), col, 2)
         cv2.putText(im, f"{nm} {s:.2f}", (x1, y1 - 10), 0, 0.6, col, 2)
+
         if nm == "Cylinder":
             d["c"] += 1
             if px:
-                h, w = (y2 - y1) / px, (x2 - x1) / px
-                d["dims"].append((h, w))
-                cv2.putText(im, f"H:{h:.2f}in D:{w:.2f}in", (x1, y2 + 20), 0, 0.6, (255, 0, 0), 2)
+                h_val, w_val = (y2 - y1)/px, (x2 - x1)/px
+                d["dims"].append((h_val, w_val))
+                cv2.putText(im, f"H:{h_val:.2f}in D:{w_val:.2f}in", (x1, y2 + 20), 0, 0.6, (255, 0, 0), 2)
         elif nm == "Voids": d["v"] += 1
         elif nm == "Surface Pores": d["p"] += 1
         elif nm == "honey_combing": d["h"] += 1
+
     cv2.imwrite(C["O"], im)
     return d
 
@@ -103,6 +104,7 @@ def R0(d, engineer="Engineer", sample_id="Sample-001"):
     S = getSampleStyleSheet()
     doc = SimpleDocTemplate(C["R"], pagesize=A4)
     st_pdf = []
+
     st_pdf.append(Paragraph("<b><font size=18>Technical Laboratory Inspection Report</font></b>", S["Title"]))
     st_pdf.append(Spacer(1, 20))
     st_pdf.append(Paragraph(f"<b>Inspection Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", S["Normal"]))
@@ -110,11 +112,13 @@ def R0(d, engineer="Engineer", sample_id="Sample-001"):
     st_pdf.append(Paragraph(f"<b>Sample ID:</b> {sample_id}", S["Normal"]))
     st_pdf.append(Paragraph(f"<b>Tested Image:</b> {os.path.basename(d['file'])}", S["Normal"]))
     st_pdf.append(Spacer(1, 20))
+
     if d["dims"]:
         for i, (h, w) in enumerate(d["dims"]):
             st_pdf.append(Paragraph(f"<b>Cylinder {i+1}:</b> Height = {h:.2f} in, Diameter = {w:.2f} in", S["Normal"]))
     else:
         st_pdf.append(Paragraph("<b>No measurable cylinders detected.</b>", S["Normal"]))
+
     st_pdf.append(Spacer(1, 20))
     data = [
         ["Defect Type", "Count"],
@@ -135,13 +139,15 @@ def R0(d, engineer="Engineer", sample_id="Sample-001"):
     ]))
     st_pdf.append(table)
     st_pdf.append(Spacer(1, 20))
+
     img = PILImage.open(C["O"])
     iw, ih = img.size
     max_w, max_h = 400, 400
-    scale = min(max_w / iw, max_h / ih)
-    w, h = iw * scale, ih * scale
+    scale = min(max_w/iw, max_h/ih)
+    w, h = iw*scale, ih*scale
     st_pdf.append(RLImage(C["O"], width=w, height=h))
     st_pdf.append(Spacer(1, 20))
+
     st_pdf.append(Paragraph("<b>Conclusion</b>", S["Heading2"]))
     st_pdf.append(Paragraph(
         "The inspected sample was analyzed using automated AI detection models. "
