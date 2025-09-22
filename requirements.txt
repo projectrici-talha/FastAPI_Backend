@@ -10,5 +10,3 @@ numpy
 gdown
 opencv-python-headless
 gunicorn
-
-
